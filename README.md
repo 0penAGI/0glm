@@ -166,3 +166,10 @@ band-mixing with *navigation over learned grain trajectories*.
 Research prototype. Two days of disciplined iteration produced the current architecture; the
 design log (decisions, dead ends, negative results) is kept deliberately — including what did
 *not* work (runway-pref entry policy: rejected for losing sharp late entries).
+
+A landing page with verbatim example outputs and a real trace excerpt lives in
+[`index.html`](index.html).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

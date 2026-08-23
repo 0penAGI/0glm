@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0GLM — Granular Language Model</title>
+<meta name="description" content="Coherent speech grown on a laptop from a small corpus — with traceability by design. Research prototype, MIT licensed.">
+<style>
+  :root {
+    --ink: #111;
+    --gray: #595959;
+    --faint: #8a8a8a;
+    --rule: #e3e3e3;
+    --bg: #ffffff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 64px 28px 96px; }
+
+  .kicker {
+    font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--faint); margin-bottom: 14px;
+  }
+  h1 { font-size: 44px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+  h1 span { font-weight: 400; color: var(--gray); }
+  .lede { font-size: 20px; line-height: 1.55; color: var(--ink); margin-top: 22px; max-width: 640px; }
+  .lede strong { font-weight: 600; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--ink); border-bottom: 1px solid var(--rule);
+    margin: 48px 0 0; padding: 22px 0;
+  }
+  .stats div { padding-right: 18px; }
+  .stats b { display: block; font-size: 24px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .stats i { font-style: normal; font-size: 12.5px; color: var(--gray); }
+
+  section { margin-top: 88px; }
+  .s-head {
+    font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink); border-bottom: 1px solid var(--ink);
+    padding-bottom: 10px; margin-bottom: 8px;
+  }
+  .s-sub { color: var(--gray); font-size: 15px; margin-bottom: 30px; max-width: 640px; }
+
+  .card { border-top: 1px solid var(--rule); padding: 30px 0 34px; }
+  .card:last-child { border-bottom: 1px solid var(--rule); }
+  .q { font-weight: 650; font-size: 17.5px; margin-bottom: 14px; }
+  .a {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 17px; line-height: 1.75; color: #222;
+  }
+  .a em { color: var(--faint); }
+  .meta {
+    margin-top: 16px; font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px; color: var(--faint); letter-spacing: 0.02em;
+  }
+  .note {
+    font-size: 13.5px; color: var(--gray); margin-top: 10px;
+    padding-left: 12px; border-left: 2px solid var(--rule);
+  }
+
+  pre.trace {
+    background: #fafafa; border: 1px solid var(--rule);
+    padding: 20px 22px; overflow-x: auto;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11.8px; line-height: 1.7; color: #333;
+  }
+
+  ul.points { list-style: none; }
+  ul.points li {
+    border-top: 1px solid var(--rule); padding: 20px 0;
+    display: flex; gap: 22px;
+  }
+  ul.points li:first-child { border-top: none; padding-top: 4px; }
+  ul.points .n {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px; color: var(--faint); min-width: 26px; padding-top: 4px;
+  }
+  ul.points p { max-width: 640px; }
+  ul.points b { font-weight: 650; }
+
+  footer {
+    margin-top: 96px; border-top: 1px solid var(--ink); padding-top: 22px;
+    display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+    font-size: 13px; color: var(--gray);
+  }
+  footer a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+
+  @media (max-width: 640px) {
+    h1 { font-size: 34px; }
+    .stats { grid-template-columns: repeat(2, 1fr); row-gap: 18px; }
+    .wrap { padding-top: 44px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="kicker">Research prototype &middot; MIT License</div>
+  <h1>0GLM <span>/ Granular Language Model</span></h1>
+  <p class="lede">
+    Coherent speech <strong>grown on a laptop</strong>, from a corpus of just
+    16,535 documents — with every sentence traceable to its source,
+    <strong>by design</strong>.
+  </p>
+
+  <div class="stats">
+    <div><b>16,535</b><i>documents in corpus</i></div>
+    <div><b>1.27M</b><i>text grains in field</i></div>
+    <div><b>&sim;15 min</b><i>navigator training, MacBook GPU</i></div>
+    <div><b>100%</b><i>sentences with named provenance</i></div>
+  </div>
+
+  <!-- ═══════════════ EXAMPLES ═══════════════ -->
+  <section>
+    <div class="s-head">Examples</div>
+    <p class="s-sub">
+      Real outputs of the current build (verbatim excerpts from generated answers;
+      ellipses mark cuts). Each answer is assembled by riding the author's own order
+      inside retrieved documents — coherence is inherited from human writing.
+    </p>
+
+    <div class="card">
+      <div class="q">How does climate change affect the ocean?</div>
+      <div class="a">
+        Besides the complexity of coupled interactions between the atmosphere, ocean,
+        ice and land, which can lead to climate change, there is the complexity of
+        understanding the dynamic role of each of the above climate components.
+        What gives the oceans the potential for exerting a strong influence on climate
+        and its variations is the large heat capacity, coupled with the global
+        redistribution of heat and other properties by ocean currents acting over time
+        scales much longer than atmospheric processes. An added complexity is that
+        ocean eddies (e.g., Gulf Stream rings) could be important mechanisms for
+        transporting heat.
+      </div>
+      <div class="meta">22 steps &middot; 4 documents &middot; mean cos 0.440 / max 0.762</div>
+      <div class="note">Opens with the mechanism (heat capacity &rarr; currents &rarr; eddies), not an adjacent fragment.</div>
+    </div>
+
+    <div class="card">
+      <div class="q">What is a Python dictionary and when should I use one?</div>
+      <div class="a">
+        A dictionary is a container that stores Python objects and each item of the
+        dictionary consists of a key and value. Python dictionaries are also known as
+        associative arrays or hash tables. Curly brackets distinguish a dictionary
+        from other objects. &hellip; The keys of a dictionary should be unique while
+        values may not be.
+      </div>
+      <div class="meta">22 steps &middot; 4 documents</div>
+      <div class="note">Polysemy case fixed by corpus density: retrieval used to land on a GNU Dico server manual (cos 0.319 &rarr; 0.490). Root cause treated, not patched.</div>
+    </div>
+
+    <div class="card">
+      <div class="q">How do I write a resume that stands out?</div>
+      <div class="a">
+        It is important to keep your resume concise. Your resume outline should not
+        exceed two pages. &hellip; Most people misunderstand the purpose of the resume.
+        Its true aim is simply to get an interview, not a job. Most people write one
+        resume and send the same version for all job queries. Successful job hunters
+        tailor-make their resumes for each job application.
+      </div>
+      <div class="meta">23 steps &middot; 4 documents</div>
+    </div>
+
+    <div class="card">
+      <div class="q">Why do humans need sleep?</div>
+      <div class="a">
+        Extra sleep helps replenish the brain and boost energy, alertness and attention
+        span after a week of restricted sleep. &hellip; Despite decades of research, why
+        we sleep is still a mystery. Theories range from conserving energy, to processing
+        information and memories, to removing toxins that build up when we&rsquo;re awake.
+      </div>
+      <div class="meta">24 steps &middot; 4 documents &middot; mean cos 0.428</div>
+    </div>
+
+    <div class="card">
+      <div class="q">What happens at the event horizon of a black hole?</div>
+      <div class="a">
+        &hellip;whether information behind the event horizon of a black hole is
+        irretrievably lost, or whether it is possible to recover that information from
+        the radiation emitted by the black hole as it evaporates. As the formal wager
+        phrased it: &ldquo;When an initial pure quantum state undergoes gravitational
+        collapse to form a black hole, the final state at the end of black hole
+        evaporation will always be a pure quantum state.&rdquo;
+      </div>
+      <div class="meta">24 steps &middot; 4 documents &middot; mean cos 0.366</div>
+      <div class="note">Reaches the historical Hawking&ndash;Thorne&ndash;Susskind information-paradox debate.</div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ TRACEABILITY ═══════════════ -->
+  <section>
+    <div class="s-head">Traceability by design</div>
+    <p class="s-sub">
+      Mechanistic interpretability reads trained networks after the fact. Here the
+      navigation layer is legible up front: <code>--trace</code> prints every candidate,
+      anchor and rejection reason. Real output for the Arctic question:
+    </p>
+<pre class="trace">&#128269; HOW THE ANSWER WAS BUILT
+  document stage: top-16 docs
+  # 4575 dsim=0.675 tail=0.643 fam=1.000 &#9989; ANCHOR &laquo;causing the temperature to rise further&#8230;&raquo;
+  #  933 dsim=0.656 tail=0.626 fam=0.569 &#9989; ANCHOR &laquo;but with less ice cover the Arctic Ocean absorbs&#8230;&raquo;
+  #  524 dsim=0.656 tail=0.632 fam=0.645    (lost MMR) &laquo;swiftly warming air and ocean temperatures&#8230;&raquo;
+  #12496 dsim=0.633 tail=0.539 fam=0.523    (lost MMR) &laquo;The Arctic has been warming disproportionately&#8230;&raquo;
+  #14552 dsim=0.610 tail=0.595 fam=0.550 &#9989; ANCHOR &laquo;They expect warming to accelerate again&#8230;&raquo;
+  #10361 dsim=0.581 tail=0.571 fam=0.567 &#9989; ANCHOR &laquo;whereas the Arctic is an ocean surrounded by&#8230;&raquo;</pre>
+    <p class="s-sub" style="margin-top:18px">
+      Post-generation, every sentence maps back to a <code>(document, position)</code> pair
+      in the corpus. This is not probing — it is the architecture being read.
+    </p>
+  </section>
+
+  <!-- ═══════════════ WHY IT MATTERS ═══════════════ -->
+  <section>
+    <div class="s-head">Why it matters</div>
+    <ul class="points">
+      <li><span class="n">01</span><p>
+        <b>A laptop is enough.</b> No datacenter, no API bills: granulation, field training
+        (~15&nbsp;min) and inference all run on one machine. The result is already coherent
+        speech at 16.5k documents — scale is a dial here, not a prerequisite.
+      </p></li>
+      <li><span class="n">02</span><p>
+        <b>Interpretability is architectural.</b> Transformers require whole teams to reverse-
+        engineer them post hoc. In 0GLM, selection happens through explicit, logged gates —
+        provenance is a property of the mechanism, not a reconstruction.
+      </p></li>
+      <li><span class="n">03</span><p>
+        <b>Density over patches.</b> When retrieval failed on polysemous queries, we fixed the
+        corpus, not the symptom: targeted harvesting flipped Python-dict 0.319&rarr;0.490 while
+        control topics stayed byte-identical.
+      </p></li>
+      <li><span class="n">04</span><p>
+        <b>Negative results are kept.</b> Dead ends are documented (entry policies that lost
+        sharp late anchors; value-blending that muted audio dynamics because predictions
+        regress to the mean — direction, not magnitude, is what a predictive head should give).
+      </p></li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════ AUDIO ═══════════════ -->
+  <section>
+    <div class="s-head">Second modality: audio</div>
+    <p class="s-sub">
+      The same trajectory renders to sound without any separate pipeline: stylometric
+      transitions map to audio targets via a learned bridge, and the navigator's
+      predicted direction steers each transition (amplitude stays factual).
+      On blind paired listens the z-steered render was preferred in 7/7 cases by the
+      author listener — an independent panel is the open next step. Diagnostics:
+      predicted style direction matches real document motion at mean cosine 0.607
+      (19/22 boundaries positive).
+    </p>
+  </section>
+
+  <footer>
+    <div>
+      <a href="https://github.com/0penAGI/0glm">github.com/0penAGI/0glm</a> &nbsp;&middot;&nbsp;
+      heritage: <a href="https://huggingface.co/0penAGI/0MGE">0MGE (HuggingFace)</a> /
+      <a href="https://github.com/0penAGI/0MGE">GitHub</a>
+    </div>
+    <div>MIT License &middot; single-listener panels so far &middot; research prototype</div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -448,13 +448,31 @@ def _ride_answer(engine, pool, anchors, per_phase, n_steps, trace=None):
     return steps
 
 
-def _qa_boost(engine, pool, question, k=8, n_hits=48):
+def _qa_boost(engine, pool, question, k=8, n_hits=48, dense_vec=None):
     """Ретрив релевантных гранул вопроса → буст-кластеры + сид-контекст
     (зеркало qa.cmd_ask, вынесено для моста). Буст/сид строятся по топ-k,
-    полный список хитов возвращается для якорей дуги."""
+    полный список хитов возвращается для якорей дуги.
+    v20b: tfidf слеп к разговорной лексике («че?», «привет») — при нуле хитов
+    падаем в ПЛОТНЫЙ ретрив по sems того же вопроса: одна механика, без заглушек."""
     from qa import Retriever
     retr = Retriever(pool)
     hits = retr.topk(question, k=n_hits)
+    if not hits and dense_vec is not None:
+        cand = []
+        for lv in range(3):
+            S = engine.sems[lv]
+            sims = S @ dense_vec
+            nn = min(n_hits * 3, len(sims))
+            idx = np.argpartition(-sims, nn - 1)[:nn] if len(sims) > nn else np.argsort(-sims)
+            texts_lv = pool[f"{['micro', 'meso', 'macro'][lv]}_texts"]
+            for gi in idx:
+                t = texts_lv[int(gi)]
+                if g._pool_junk(t):
+                    continue
+                cand.append((t, float(sims[int(gi)]), (lv, int(gi))))
+        cand.sort(key=lambda x: -x[1])
+        hits = cand[:n_hits]
+        print(f"(tfidf пуст → плотный ретрив по sems: {len(hits)} гранул)")
     print(f"\n🔍 Хиты вопроса:")
     for t, s, _fc in hits[:3]:
         print(f"   [{s:.3f}] {t[:80]}...")
@@ -470,19 +488,25 @@ def _qa_boost(engine, pool, question, k=8, n_hits=48):
     boosted = set()
     hit_feats = []
     for t, s, fc in hits[:k]:
-        ln_c, gi_c = _flat2coord(fc)
+        ln_c, gi_c = fc if isinstance(fc, tuple) else _flat2coord(fc)
         f = pool[["micro_feats", "meso_feats", "macro_feats"][ln_c]][gi_c]
         hit_feats.append(f)
         cid = inv.get((ln_c, gi_c))          # кластер самого зерна — точный
         if cid is not None: boosted.add(cid)
     all_f = np.concatenate([pool["micro_feats"], pool["meso_feats"], pool["macro_feats"]])
-    ctx_seed = np.array(hit_feats[:g.CONTEXT_LEN], dtype=np.float32)
-    if len(ctx_seed) < g.CONTEXT_LEN:
-        pad = all_f[np.random.choice(len(all_f), g.CONTEXT_LEN - len(ctx_seed), replace=False)]
-        ctx_seed = np.concatenate([ctx_seed, pad], axis=0)
+    if hit_feats:
+        ctx_seed = np.array(hit_feats[:g.CONTEXT_LEN], dtype=np.float32)
+        if len(ctx_seed.shape) == 1:
+            ctx_seed = ctx_seed.reshape(1, -1)
+        if len(ctx_seed) < g.CONTEXT_LEN:
+            pad = all_f[np.random.choice(len(all_f), g.CONTEXT_LEN - len(ctx_seed), replace=False)]
+            ctx_seed = np.concatenate([ctx_seed, pad], axis=0)
+    else:
+        # запрос вне словаря («че?»): сид из случайного поля, хитов нет
+        ctx_seed = all_f[np.random.choice(len(all_f), g.CONTEXT_LEN, replace=False)]
     q_feat = g.extract_feat_from_text(question)
     return boosted, ctx_seed, (q_feat if q_feat is not None else np.zeros(g.FEAT_DIM, dtype=np.float32)), \
-        [(t, s, _flat2coord(fc)) for t, s, fc in hits]
+        [(t, s, fc if isinstance(fc, tuple) else _flat2coord(fc)) for t, s, fc in hits]
 
 
 def sensitivity_probe(retr):
@@ -607,9 +631,14 @@ def main():
                 _qin = Q
             qemb = _st.encode([_qin])[0]
             qn = (qemb / (np.linalg.norm(qemb) + 1e-9)).astype(np.float32)
-            boost, ctx_seed, q_feat, hit_list = _qa_boost(engine, pool, Q)
+            boost, ctx_seed, q_feat, hit_list = _qa_boost(engine, pool, Q, dense_vec=qn)
             hit_texts = [t for t, _, _ in hit_list]
             hit_coords = [c for _, _, c in hit_list]
+            if not hit_list:
+                print("🤔 ни одного слова вопроса нет в словаре — попробуй другими словами")
+                if args.chat:
+                    continue
+                raise SystemExit(1)
             cfg = dict(STICKY_CFG)
             if args.warmup > 0:
                 cfg["sticky_warmup"] = args.warmup

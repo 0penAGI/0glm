@@ -157,9 +157,9 @@ renders a randomized blind A/B pair (`zab_*_A.wav/_B.wav` + `_key.json`) for lis
 ## Heritage
 
 The audio half descends from the author's earlier oscillator work:
-[HuggingFace](https://huggingface.co/0penAGI/0MGE) — text rendered through frequency-band dynamics.
-0GLM keeps that physical intuition but replaces band-mixing with *navigation over learned grain
-trajectories*.
+[HuggingFace](https://huggingface.co/0penAGI/0MGE) ([GitHub](https://github.com/0penAGI/0MGE)) —
+text rendered through frequency-band dynamics. 0GLM keeps that physical intuition but replaces
+band-mixing with *navigation over learned grain trajectories*.
 
 ## Status
 

@@ -537,6 +537,9 @@ def main():
                     help="откат: аудио-переходы только из фактических feats")
     ap.add_argument("--z-alpha", type=float, default=0.5,
                     help="вес направления z в бленде (0=как без z)")
+    ap.add_argument("--chat", action="store_true",
+                    help="сессия: диалоговая память (хвост ответа подмешивается "
+                         "в поиск при продолжении темы); /new сброс, /exit выход")
     ap.add_argument("--warmup", type=int, default=0,
                     help="K шагов фазы поиска (буст 0.95, sticky выкл); 0 = без расписания")
     ap.add_argument("--adaptive", action="store_true",
@@ -566,257 +569,303 @@ def main():
         if os.path.exists(alt): mp = alt
     model, sem_proj, aff_ctx, pos_ctx = _load_navigator(mp)
 
-    if args.ask:
-        from sentence_transformers import SentenceTransformer
-        _st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-        qemb = _st.encode([args.ask])[0]
-        qn = (qemb / (np.linalg.norm(qemb) + 1e-9)).astype(np.float32)
-        boost, ctx_seed, q_feat, hit_list = _qa_boost(engine, pool, args.ask)
-        hit_texts = [t for t, _, _ in hit_list]
-        hit_coords = [c for _, _, c in hit_list]
-        cfg = dict(STICKY_CFG)
-        if args.warmup > 0:
-            cfg["sticky_warmup"] = args.warmup
-            cfg["boost_p_warmup"] = 0.95
-        if aff_ctx is not None:
-            # настроение вопроса → аффективный якорь генерации (v7):
-            # эмоциональная окраска ответа следует тону запроса
+    # ── CHAT/SESSION (v20): одиночный --ask или интерактив с памятью ──
+    _sess = {"turns": []}
+    _first = True
+    while True:
+        if _first and args.ask:
+            Q = args.ask
+        elif args.chat:
             try:
-                from nltk.sentiment.vader import SentimentIntensityAnalyzer
-                _sc = SentimentIntensityAnalyzer().polarity_scores(args.ask)
-                _qv = float(np.clip(_sc["compound"], -1, 1))
-                _qa_ = float(np.clip(_sc["pos"] + _sc["neg"]
-                                     + (args.ask.count("!") + args.ask.count("?")) * 0.08, 0, 1))
-            except Exception:
-                _qv, _qa_ = 0.0, 0.0
-            cfg["aff_w"] = 1.5
-            cfg["mood"] = np.array([_qv, _qa_], dtype=np.float32)
-            print(f"🎭 mood вопроса: valence={_qv:+.2f} arousal={_qa_:.2f}")
-        if args.q_w > 0:
-            # q-магнит (v11): вопрос тянет выборку зёрен всё время генерации
-            cfg["q_ref"] = qn
-            cfg["q_w"] = args.q_w
-            print(f"🧲 q-магнит: w={args.q_w}")
-        if args.hub_w > 0:
-            cfg["hub_w"] = float(args.hub_w)
-            cfg["no_cite"] = True
-            print(f"🚫 анти-хаб: w={args.hub_w} + анти-цитаты")
-        trace_arc, trace_ev = None, None
-        if args.arc > 0 and hit_texts:
-            # дуга ответа v18: первый этап — ВСЕ 12k доков (кэш doc_embs),
-            # не 6%-сэмпл зернового ретрива. Топ-D дока → лучшее зерно входа
-            # → хвостовая оценка (куда ride повезёт) → MMR по хвостам.
-            lookup = _build_traj_lookup(pool)
-            Dembs = g.build_doc_embs(pool, engine.sems)
-            dsims = Dembs @ qn
-            top_docs = [int(d) for d in np.argsort(-dsims)[:16]]
-            print(f"🚪 док-поиск: топ-{len(top_docs)} из {len(Dembs)} доков, "
-                  f"sim .{int(dsims[top_docs[0]]*1000)}/1000")
-
-            def _tail_vec(coord, k=10):
-                """Среднее сем следующих k чистых микро/мезо звеньев траектории."""
-                if coord not in lookup:
-                    return None
-                ti, j = lookup[coord]
-                traj = pool["trajectories"][ti]
-                vs = []
-                while j < len(traj) and len(vs) < k:
-                    lv, ix = int(traj[j][0]), int(traj[j][1])
-                    if lv <= 1:
-                        t = pool[f"{['micro', 'meso', 'macro'][lv]}_texts"][ix]
-                        if not g._pool_junk(t):
-                            vs.append(engine.sems[lv][ix])
-                    j += 1
-                if not vs:
-                    return None
-                v = np.mean(vs, axis=0)
-                n = float(np.linalg.norm(v))
-                return (v / n).astype(np.float32) if n > 1e-6 else None
-
-            # зерно входа в каждом топ-доке: лучший чистый гран по sim к вопросу
-            cand_coords, cand_texts, tails, trace_cands = [], [], [], []
-            for d in top_docs:
-                members = [(int(lv), int(ix)) for lv, ix in pool["trajectories"][d]
-                           if int(lv) <= 1]
-                ok = [k for k, (lv, ix) in enumerate(members)
-                      if not g._pool_junk(pool[f"{['micro', 'meso'][lv]}_texts"][ix])]
-                if not ok:
-                    continue
-                S = np.array([engine.sems[members[k][0]][members[k][1]] for k in ok])
-                # v18c: вход = ОСТРЫЙ семантический матч; короткий runway
-                # компенсируется переносом бюджета следующей фазе (extra)
-                kb = int(np.argmax(S @ qn))
-                lv, ix = members[ok[kb]]
-                coord = (lv, ix)
-                tv = _tail_vec(coord)
-                if tv is None:
-                    continue
-                cand_coords.append(coord)
-                cand_texts.append(pool[f"{['micro', 'meso'][lv]}_texts"][ix])
-                tails.append(tv)
-                trace_cands.append({"doc": d, "dsim": round(float(dsims[d]), 3),
-                                    "entry": pool[f"{['micro', 'meso'][lv]}_texts"][ix][:70]})
-            T = np.array(tails) if tails else np.zeros((1, 384), np.float32)
-            trels = T @ qn
-            order = list(np.argsort(-trels))
-            anchors = [{"sem": T[order[0]], "coord": cand_coords[order[0]]}]
-            fam0 = T[order[0]]
-            while len(anchors) < args.arc:
-                bi, bv = None, -1e9
-                for ii, i in enumerate(order):
-                    if float(trels[i]) < 0.32: continue   # слабо релевантный хвост ≠ фаза
-                    if float(T[i] @ T[order[0]]) < 0.30: continue  # чужая семья: якорь №1 задаёт тему
-                    mxs = max(float(T[i] @ A_["sem"]) for A_ in anchors)
-                    if mxs > 0.85: continue               # уже сказано
-                    v = float(trels[i]) - 0.7 * mxs
-                    if v > bv: bv, bi = v, ii
-                if bi is None:
-                    break                                 # нового релевантного нет
-                anchors.append({"sem": T[order[bi]],
-                                "coord": cand_coords[order[bi]]})
-            # интроспекция: причины по каждому кандидату
-            chosen = {tuple(int(x) for x in A_["coord"]) for A_ in anchors}
-            for ri, row in enumerate(trace_cands):
-                row["trel"] = round(float(trels[ri]), 3)
-                row["fam"] = round(float(T[ri] @ fam0), 3)
-                row["chosen"] = cand_coords[ri] in chosen
-                if not row["chosen"]:
-                    row["why_not"] = ("trel<.32" if trels[ri] < 0.32 else
-                                      "чужая семья" if row["fam"] < 0.30 else
-                                      "дубль фазы (mxs>.85)" if
-                                      max(float(T[ri] @ A_["sem"]) for A_ in anchors) > 0.85
-                                      else "не выиграл MMR")
-            trace_arc = {"top_docs": len(top_docs), "candidates": trace_cands,
-                         "n_anchors": len(anchors)}
-            if len(anchors) >= 2:
-                per = max(4, int(round(args.steps / len(anchors))))
-                cfg["arc"] = {"anchors": anchors, "per_phase": per}
-                print(f"🎬 дуга: {len(anchors)} фаз × {per} шагов")
-            else:
-                print("🎬 дуга выкл: меньше 2 релевантных якорей")
-        if args.ride:
-            # v16: связность из траекторий документов. Якоря дуги = точки входа,
-            # внутри фазы едем по реальному тексту. Навигатор и магниты отдыхают.
-            arc_cfg = cfg.get("arc") or {}
-            anchors = arc_cfg.get("anchors") or (
-                [{"coord": hit_coords[0]}] if hit_coords else [])
-            trace_ev = [] if args.trace else None
-            rsteps = _ride_answer(engine, pool, anchors,
-                                  arc_cfg.get("per_phase",
-                                              max(4, args.steps // 4)),
-                                  args.steps, trace=trace_ev)
-            print(f"🛤️ ride: {len(rsteps)} зёрен из {len({s['doc'] for s in rsteps})} доков")
-            steps = [rsteps]
-            text = g.stitch_narrative(rsteps, engine)
-            z_arr = np.zeros((max(1, len(rsteps)), 64), dtype=np.float32)
+                _raw = input("\n❓ ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not _raw:
+                continue
+            if _raw.lower() in ("/exit", "/quit", "/q"):
+                break
+            if _raw.lower() == "/new":
+                _sess["turns"].clear()
+                print("🧹 память диалога очищена")
+                continue
+            if _raw.startswith("/"):
+                print("команды: /new /exit"); continue
+            Q = _raw
         else:
-            text, z_arr, steps = g.generate_multi(
-                model, engine, pool, n_steps=args.steps, seed=args.seed,
-                temp=args.temperature, target_stats=q_feat,
-                ctx_init=ctx_seed, boost_clusters=boost, sem_cfg=cfg,
-                ref_sem=(qn if args.adaptive else None),
-                sem_ctx=sem_proj, affect_ctx=aff_ctx, pos_ctx=pos_ctx)
-        manifest = sonify_stream(steps[0], retr)
-        cs = [float(np.dot(engine.sems[s["level"]][s["idx"]], qn)) for s in steps[0]]
-        print(f"🎯 relevance: mean cos={np.mean(cs):.3f} max={np.max(cs):.3f}")
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = os.path.join(g.OUT, f"sonify_qa_{ts}.json")
-        with open(out, "w") as f:
-            json.dump({"meta": {"question": args.ask, "steps": args.steps,
-                                "seed": args.seed,
-                                "mode": "ride" if args.ride else "attract",
-                                "cfg": ("ride: doc-first+arc+drift-gate" if args.ride
-                                        else "U_micro+sticky(.8,.93)"),
-                                "model": os.path.basename(mp),
-                                "model_used_in_mode": not args.ride,
-                                "full_text": text},
-                       "manifest": manifest}, f, ensure_ascii=False, indent=1)
-        # v19c: z-мост — ДЕФОЛТ аудио-переходов ride (слепая серия за z:
-        # 2 одиночных + батарея 5). Направление от feat_head, масштаб
-        # фактический. Текст/трейс не меняются; --no-z-audio = feats-only.
-        if args.ride and model is not None and not args.no_z_audio:
-            man_z = _sonify_stream_z(steps[0], retr, model, alpha=args.z_alpha,
-                                     proj=sem_proj, aff=aff_ctx)
-            with open(out) as f:
-                mm = json.load(f)
-            for so, sz in zip(mm["manifest"], man_z):
-                so["dist_plain"] = so.get("dist")
-                for k in ("text_params", "target_audio", "grain", "z_dir_cos"):
-                    so[k] = sz[k]
-                so.pop("dist", None)
-            mm["meta"]["audio_variant"] = f"z-dir alpha={args.z_alpha}"
+            break
+        _first = False
+        if True:  # ── тело одного хода диалога
+            from sentence_transformers import SentenceTransformer
+            _st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            # v20 session: запрос едет вместе с контекстом прошлого ответа —
+            # местоимения («it», «the watch») разрешаются текстом, не порогами
+            if _sess["turns"]:
+                _pq, _pa = _sess["turns"][-1]
+                _qin = f"{Q} Context: {_pa[:400]}"
+                print(f"🔗 сессия: контекст прошлого ответа ({len(_sess['turns'])} ход)")
+            else:
+                _qin = Q
+            qemb = _st.encode([_qin])[0]
+            qn = (qemb / (np.linalg.norm(qemb) + 1e-9)).astype(np.float32)
+            boost, ctx_seed, q_feat, hit_list = _qa_boost(engine, pool, Q)
+            hit_texts = [t for t, _, _ in hit_list]
+            hit_coords = [c for _, _, c in hit_list]
+            cfg = dict(STICKY_CFG)
+            if args.warmup > 0:
+                cfg["sticky_warmup"] = args.warmup
+                cfg["boost_p_warmup"] = 0.95
+            if aff_ctx is not None:
+                # настроение вопроса → аффективный якорь генерации (v7):
+                # эмоциональная окраска ответа следует тону запроса
+                try:
+                    from nltk.sentiment.vader import SentimentIntensityAnalyzer
+                    _sc = SentimentIntensityAnalyzer().polarity_scores(Q)
+                    _qv = float(np.clip(_sc["compound"], -1, 1))
+                    _qa_ = float(np.clip(_sc["pos"] + _sc["neg"]
+                                         + (Q.count("!") + Q.count("?")) * 0.08, 0, 1))
+                except Exception:
+                    _qv, _qa_ = 0.0, 0.0
+                cfg["aff_w"] = 1.5
+                cfg["mood"] = np.array([_qv, _qa_], dtype=np.float32)
+                print(f"🎭 mood вопроса: valence={_qv:+.2f} arousal={_qa_:.2f}")
+            if args.q_w > 0:
+                # q-магнит (v11): вопрос тянет выборку зёрен всё время генерации
+                cfg["q_ref"] = qn
+                cfg["q_w"] = args.q_w
+                print(f"🧲 q-магнит: w={args.q_w}")
+            if args.hub_w > 0:
+                cfg["hub_w"] = float(args.hub_w)
+                cfg["no_cite"] = True
+                print(f"🚫 анти-хаб: w={args.hub_w} + анти-цитаты")
+            trace_arc, trace_ev = None, None
+            if args.arc > 0 and hit_texts:
+                # дуга ответа v18: первый этап — ВСЕ 12k доков (кэш doc_embs),
+                # не 6%-сэмпл зернового ретрива. Топ-D дока → лучшее зерно входа
+                # → хвостовая оценка (куда ride повезёт) → MMR по хвостам.
+                lookup = _build_traj_lookup(pool)
+                Dembs = g.build_doc_embs(pool, engine.sems)
+                dsims = Dembs @ qn
+                top_docs = [int(d) for d in np.argsort(-dsims)[:16]]
+                print(f"🚪 док-поиск: топ-{len(top_docs)} из {len(Dembs)} доков, "
+                      f"sim .{int(dsims[top_docs[0]]*1000)}/1000")
+
+                def _tail_vec(coord, k=10):
+                    """Среднее сем следующих k чистых микро/мезо звеньев траектории."""
+                    if coord not in lookup:
+                        return None
+                    ti, j = lookup[coord]
+                    traj = pool["trajectories"][ti]
+                    vs = []
+                    while j < len(traj) and len(vs) < k:
+                        lv, ix = int(traj[j][0]), int(traj[j][1])
+                        if lv <= 1:
+                            t = pool[f"{['micro', 'meso', 'macro'][lv]}_texts"][ix]
+                            if not g._pool_junk(t):
+                                vs.append(engine.sems[lv][ix])
+                        j += 1
+                    if not vs:
+                        return None
+                    v = np.mean(vs, axis=0)
+                    n = float(np.linalg.norm(v))
+                    return (v / n).astype(np.float32) if n > 1e-6 else None
+
+                # зерно входа в каждом топ-доке: лучший чистый гран по sim к вопросу
+                cand_coords, cand_texts, tails, trace_cands = [], [], [], []
+                for d in top_docs:
+                    members = [(int(lv), int(ix)) for lv, ix in pool["trajectories"][d]
+                               if int(lv) <= 1]
+                    ok = [k for k, (lv, ix) in enumerate(members)
+                          if not g._pool_junk(pool[f"{['micro', 'meso'][lv]}_texts"][ix])]
+                    if not ok:
+                        continue
+                    S = np.array([engine.sems[members[k][0]][members[k][1]] for k in ok])
+                    # v18c: вход = ОСТРЫЙ семантический матч; короткий runway
+                    # компенсируется переносом бюджета следующей фазе (extra)
+                    kb = int(np.argmax(S @ qn))
+                    lv, ix = members[ok[kb]]
+                    coord = (lv, ix)
+                    tv = _tail_vec(coord)
+                    if tv is None:
+                        continue
+                    cand_coords.append(coord)
+                    cand_texts.append(pool[f"{['micro', 'meso'][lv]}_texts"][ix])
+                    tails.append(tv)
+                    trace_cands.append({"doc": d, "dsim": round(float(dsims[d]), 3),
+                                        "entry": pool[f"{['micro', 'meso'][lv]}_texts"][ix][:70]})
+                T = np.array(tails) if tails else np.zeros((1, 384), np.float32)
+                trels = T @ qn
+                order = list(np.argsort(-trels))
+                anchors = [{"sem": T[order[0]], "coord": cand_coords[order[0]]}]
+                fam0 = T[order[0]]
+                while len(anchors) < args.arc:
+                    bi, bv = None, -1e9
+                    for ii, i in enumerate(order):
+                        if float(trels[i]) < 0.32: continue   # слабо релевантный хвост ≠ фаза
+                        if float(T[i] @ T[order[0]]) < 0.30: continue  # чужая семья: якорь №1 задаёт тему
+                        mxs = max(float(T[i] @ A_["sem"]) for A_ in anchors)
+                        if mxs > 0.85: continue               # уже сказано
+                        v = float(trels[i]) - 0.7 * mxs
+                        if v > bv: bv, bi = v, ii
+                    if bi is None:
+                        break                                 # нового релевантного нет
+                    anchors.append({"sem": T[order[bi]],
+                                    "coord": cand_coords[order[bi]]})
+                # интроспекция: причины по каждому кандидату
+                chosen = {tuple(int(x) for x in A_["coord"]) for A_ in anchors}
+                for ri, row in enumerate(trace_cands):
+                    row["trel"] = round(float(trels[ri]), 3)
+                    row["fam"] = round(float(T[ri] @ fam0), 3)
+                    row["chosen"] = cand_coords[ri] in chosen
+                    if not row["chosen"]:
+                        row["why_not"] = ("trel<.32" if trels[ri] < 0.32 else
+                                          "чужая семья" if row["fam"] < 0.30 else
+                                          "дубль фазы (mxs>.85)" if
+                                          max(float(T[ri] @ A_["sem"]) for A_ in anchors) > 0.85
+                                          else "не выиграл MMR")
+                trace_arc = {"top_docs": len(top_docs), "candidates": trace_cands,
+                             "n_anchors": len(anchors)}
+                if len(anchors) >= 2:
+                    per = max(4, int(round(args.steps / len(anchors))))
+                    cfg["arc"] = {"anchors": anchors, "per_phase": per}
+                    print(f"🎬 дуга: {len(anchors)} фаз × {per} шагов")
+                else:
+                    print("🎬 дуга выкл: меньше 2 релевантных якорей")
+            if args.ride:
+                # v16: связность из траекторий документов. Якоря дуги = точки входа,
+                # внутри фазы едем по реальному тексту. Навигатор и магниты отдыхают.
+                arc_cfg = cfg.get("arc") or {}
+                anchors = arc_cfg.get("anchors") or (
+                    [{"coord": hit_coords[0]}] if hit_coords else [])
+                trace_ev = [] if args.trace else None
+                rsteps = _ride_answer(engine, pool, anchors,
+                                      arc_cfg.get("per_phase",
+                                                  max(4, args.steps // 4)),
+                                      args.steps, trace=trace_ev)
+                print(f"🛤️ ride: {len(rsteps)} зёрен из {len({s['doc'] for s in rsteps})} доков")
+                steps = [rsteps]
+                text = g.stitch_narrative(rsteps, engine)
+                z_arr = np.zeros((max(1, len(rsteps)), 64), dtype=np.float32)
+            else:
+                text, z_arr, steps = g.generate_multi(
+                    model, engine, pool, n_steps=args.steps, seed=args.seed,
+                    temp=args.temperature, target_stats=q_feat,
+                    ctx_init=ctx_seed, boost_clusters=boost, sem_cfg=cfg,
+                    ref_sem=(qn if args.adaptive else None),
+                    sem_ctx=sem_proj, affect_ctx=aff_ctx, pos_ctx=pos_ctx)
+            manifest = sonify_stream(steps[0], retr)
+            cs = [float(np.dot(engine.sems[s["level"]][s["idx"]], qn)) for s in steps[0]]
+            print(f"🎯 relevance: mean cos={np.mean(cs):.3f} max={np.max(cs):.3f}")
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            out = os.path.join(g.OUT, f"sonify_qa_{ts}.json")
             with open(out, "w") as f:
-                json.dump(mm, f, ensure_ascii=False, indent=1)
-            print(f"🌊 аудио: z-dir α={args.z_alpha} (дефолт; --no-z-audio откат)")
-        rl = out.replace(".json", "_readalong.txt")
-        with open(rl, "w") as f:
-            for e in manifest:
-                mm, ss = divmod(int(e["step"] * args.sec_per_step), 60)
-                f.write(f"[{mm:02d}:{ss:02d}] {e['text_excerpt']}\n")
-        _a = g.stitch_narrative(steps[0], engine)
-        if len(_a) > 1200:   # не режем на полуслове
-            _cut = _a.rfind(" ", 1000, 1200)
-            _a = _a[:_cut if _cut > 0 else 1200] + " …"
-        print(f"\n{'─'*60}\nQ: {args.ask}\nA: {_a}\n{'─'*60}")
-        print(f"💾 {out}\n📖 {rl}")
-        if args.trace:
-            tr = {"question": args.ask, "arc": trace_arc,
-                  "events": trace_ev or []}
-            tp = out.replace(".json", "_trace.json")
-            with open(tp, "w") as f:
-                json.dump(tr, f, ensure_ascii=False, indent=1)
-            print("\n🔍 КАК СТРОИЛСЯ ОТВЕТ")
-            print(f"  док-этап: топ-{(trace_arc or {}).get('top_docs')} доков")
-            for c in (trace_arc or {}).get("candidates", []):
-                mark = "✅ ЯКОРЬ" if c.get("chosen") else f"   ({c.get('why_not')})"
-                print(f"  #{c['doc']:>5} dsim={c['dsim']:.3f} "
-                      f"tail={c['trel']:.3f} fam={c['fam']:.3f} "
-                      f"{mark} «{c['entry']}»")
-            ph = None
-            for ev in trace_ev or []:
-                if ev["ev"] == "phase_start":
-                    ph = ev["phase"]
-                    print(f"  ▶ фаза {ph}: вход в док #{ev['doc']} (зерно {ev['entry_j']})")
-                elif ev["ev"] == "drift_gate":
-                    print(f"    ⛵ дрейф: окно cos {ev['cos']} < пол {ev['floor']} "
-                          f"после {ev['taken']} шагов — смена фазы")
-                elif ev["ev"] == "skip":
-                    print(f"    ✗ {'µσΩ'[ev['level']]}{ev['idx']} "
-                          f"[{ev['why']}] «{ev['head']}…»")
-                elif ev["ev"] == "step":
-                    print(f"    · док#{ev['doc']} {'µσ'[ev['level']]}{ev['idx']} "
-                          f"«{ev['head']}…»")
-            print(f"🔍 трейс: {tp}")
-        render_manifest(out, sec_per_step=args.sec_per_step)
-        if args.z_audio:
-            import zlib
-            # слепая пара: текущий дефолт против feats-only, стороны случайны
-            with open(out) as f:
-                cur_mm = json.load(f)
-            lbl_cur = cur_mm["meta"].get("audio_variant", "feats-only")
-            man_alt = sonify_stream(steps[0], retr)
-            alt_mm = {"meta": dict(cur_mm["meta"], audio_variant="feats-only"),
-                      "manifest": [dict(m, **{k: p[k] for k in
-                                              ("text_params", "target_audio",
-                                               "grain")})
-                                   for m, p in zip(cur_mm["manifest"], man_alt)]}
-            out_alt = out.replace(".json", "_alt.json")
-            with open(out_alt, "w") as f:
-                json.dump(alt_mm, f, ensure_ascii=False, indent=1)
-            w_cur = render_manifest(out, sec_per_step=args.sec_per_step)
-            w_alt = render_manifest(out_alt, sec_per_step=args.sec_per_step)
-            rng = np.random.default_rng(zlib.crc32(out.encode()))
-            a_is_cur = bool(rng.integers(0, 2))
-            base = os.path.join(g.OUT, f"zab_{ts}")
-            os.rename(w_cur, base + ("_A.wav" if a_is_cur else "_B.wav"))
-            os.rename(w_alt, base + ("_B.wav" if a_is_cur else "_A.wav"))
-            key = {"A": lbl_cur if a_is_cur else "feats-only",
-                   "B": "feats-only" if a_is_cur else lbl_cur}
-            with open(base + "_key.json", "w") as f:
-                json.dump(key, f, indent=1)
-            print(f"\n🎧 Z-A/B: {base}_A.wav | {base}_B.wav")
-            print("   послушай вслепую, потом загляни в _key.json")
-        return
+                json.dump({"meta": {"question": Q, "steps": args.steps,
+                                    "seed": args.seed,
+                                    "mode": "ride" if args.ride else "attract",
+                                    "cfg": ("ride: doc-first+arc+drift-gate" if args.ride
+                                            else "U_micro+sticky(.8,.93)"),
+                                    "model": os.path.basename(mp),
+                                    "model_used_in_mode": not args.ride,
+                                    "full_text": text},
+                           "manifest": manifest}, f, ensure_ascii=False, indent=1)
+            # v19c: z-мост — ДЕФОЛТ аудио-переходов ride (слепая серия за z:
+            # 2 одиночных + батарея 5). Направление от feat_head, масштаб
+            # фактический. Текст/трейс не меняются; --no-z-audio = feats-only.
+            if args.ride and model is not None and not args.no_z_audio:
+                man_z = _sonify_stream_z(steps[0], retr, model, alpha=args.z_alpha,
+                                         proj=sem_proj, aff=aff_ctx)
+                with open(out) as f:
+                    mm = json.load(f)
+                for so, sz in zip(mm["manifest"], man_z):
+                    so["dist_plain"] = so.get("dist")
+                    for k in ("text_params", "target_audio", "grain", "z_dir_cos"):
+                        so[k] = sz[k]
+                    so.pop("dist", None)
+                mm["meta"]["audio_variant"] = f"z-dir alpha={args.z_alpha}"
+                with open(out, "w") as f:
+                    json.dump(mm, f, ensure_ascii=False, indent=1)
+                print(f"🌊 аудио: z-dir α={args.z_alpha} (дефолт; --no-z-audio откат)")
+            rl = out.replace(".json", "_readalong.txt")
+            with open(rl, "w") as f:
+                for e in manifest:
+                    mm, ss = divmod(int(e["step"] * args.sec_per_step), 60)
+                    f.write(f"[{mm:02d}:{ss:02d}] {e['text_excerpt']}\n")
+            _a = g.stitch_narrative(steps[0], engine)
+            if len(_a) > 1200:   # не режем на полуслове
+                _cut = _a.rfind(" ", 1000, 1200)
+                _a = _a[:_cut if _cut > 0 else 1200] + " …"
+            print(f"\n{'─'*60}\nQ: {Q}\nA: {_a}\n{'─'*60}")
+            print(f"💾 {out}\n📖 {rl}")
+            if args.trace:
+                tr = {"question": Q, "arc": trace_arc,
+                      "events": trace_ev or []}
+                tp = out.replace(".json", "_trace.json")
+                with open(tp, "w") as f:
+                    json.dump(tr, f, ensure_ascii=False, indent=1)
+                print("\n🔍 КАК СТРОИЛСЯ ОТВЕТ")
+                print(f"  док-этап: топ-{(trace_arc or {}).get('top_docs')} доков")
+                for c in (trace_arc or {}).get("candidates", []):
+                    mark = "✅ ЯКОРЬ" if c.get("chosen") else f"   ({c.get('why_not')})"
+                    print(f"  #{c['doc']:>5} dsim={c['dsim']:.3f} "
+                          f"tail={c['trel']:.3f} fam={c['fam']:.3f} "
+                          f"{mark} «{c['entry']}»")
+                ph = None
+                for ev in trace_ev or []:
+                    if ev["ev"] == "phase_start":
+                        ph = ev["phase"]
+                        print(f"  ▶ фаза {ph}: вход в док #{ev['doc']} (зерно {ev['entry_j']})")
+                    elif ev["ev"] == "drift_gate":
+                        print(f"    ⛵ дрейф: окно cos {ev['cos']} < пол {ev['floor']} "
+                              f"после {ev['taken']} шагов — смена фазы")
+                    elif ev["ev"] == "skip":
+                        print(f"    ✗ {'µσΩ'[ev['level']]}{ev['idx']} "
+                              f"[{ev['why']}] «{ev['head']}…»")
+                    elif ev["ev"] == "step":
+                        print(f"    · док#{ev['doc']} {'µσ'[ev['level']]}{ev['idx']} "
+                              f"«{ev['head']}…»")
+                print(f"🔍 трейс: {tp}")
+            render_manifest(out, sec_per_step=args.sec_per_step)
+            if args.z_audio:
+                import zlib
+                # слепая пара: текущий дефолт против feats-only, стороны случайны
+                with open(out) as f:
+                    cur_mm = json.load(f)
+                lbl_cur = cur_mm["meta"].get("audio_variant", "feats-only")
+                man_alt = sonify_stream(steps[0], retr)
+                alt_mm = {"meta": dict(cur_mm["meta"], audio_variant="feats-only"),
+                          "manifest": [dict(m, **{k: p[k] for k in
+                                                  ("text_params", "target_audio",
+                                                   "grain")})
+                                       for m, p in zip(cur_mm["manifest"], man_alt)]}
+                out_alt = out.replace(".json", "_alt.json")
+                with open(out_alt, "w") as f:
+                    json.dump(alt_mm, f, ensure_ascii=False, indent=1)
+                w_cur = render_manifest(out, sec_per_step=args.sec_per_step)
+                w_alt = render_manifest(out_alt, sec_per_step=args.sec_per_step)
+                rng = np.random.default_rng(zlib.crc32(out.encode()))
+                a_is_cur = bool(rng.integers(0, 2))
+                base = os.path.join(g.OUT, f"zab_{ts}")
+                os.rename(w_cur, base + ("_A.wav" if a_is_cur else "_B.wav"))
+                os.rename(w_alt, base + ("_B.wav" if a_is_cur else "_A.wav"))
+                key = {"A": lbl_cur if a_is_cur else "feats-only",
+                       "B": "feats-only" if a_is_cur else lbl_cur}
+                with open(base + "_key.json", "w") as f:
+                    json.dump(key, f, indent=1)
+                print(f"\n🎧 Z-A/B: {base}_A.wav | {base}_B.wav")
+                print("   послушай вслепую, потом загляни в _key.json")
+        # обновление памяти сессии: хвост = сем последних 3 зёрен ответа
+        _sess["turns"].append((Q, text))
+        if not args.chat:
+            break
+
+    # транскрипт сессии
+    if args.chat and _sess["turns"]:
+        _cts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        _cp = os.path.join(g.OUT, f"chat_{_cts}.txt")
+        with open(_cp, "w") as _f:
+            for _q, _a in _sess["turns"]:
+                _f.write(f"❓ {_q}\n\n{_a}\n\n{'─'*60}\n\n")
+        print(f"💾 транскрипт: {_cp} ({len(_sess['turns'])} ходов)")
+    return
 
     if args.render_manifest:
         render_manifest(args.render_manifest, sec_per_step=args.sec_per_step)

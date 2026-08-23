@@ -277,6 +277,11 @@ python build_corpus_big.py --help
 # 2) granulate + caches + train the navigator
 python train_field_v15.py --help
 
+#    or talk to it — session mode with dialogue memory:
+python audio_bridge.py --chat --ride --seed 7 --steps 24 --arc 4
+#    follow-ups keep context ("why do scientists watch it so closely?" resolves
+#    pronouns from the previous answer); /new resets, /exit saves a transcript
+
 # 3) ask — traced, coherent, and audible
 python audio_bridge.py --ask "How does climate change affect the ocean?" \
                        --ride --trace --seed 7 --steps 24 --arc 4

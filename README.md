@@ -1,5 +1,10 @@
 # 0GLM — Granular Language Model
 
+> **On the name:** *Granular Language Model* describes what the system does today.
+> The same letters also read **Granular Living Model** — the class of system being built:
+> grains as living states of a navigable field, language just one readout among possible
+> projections. One name, current fact and declared direction.
+
 **Coherent speech grown on a laptop from oscillator-field grain dynamics — with traceability by design.**
 
 0GLM is not another transformer. It is an attempt to build a small language system where

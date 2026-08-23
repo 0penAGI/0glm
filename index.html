@@ -73,6 +73,21 @@
     font-family: "SF Mono", ui-monospace, Menlo, monospace;
     font-size: 11.8px; line-height: 1.7; color: #333;
   }
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 15px; }
+  table.cmp th {
+    text-align: left; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--faint); font-weight: 600;
+    border-bottom: 1px solid var(--ink); padding: 10px 18px 10px 0; width: 34%;
+  }
+  table.cmp th:first-child { width: 16%; }
+  table.cmp td {
+    border-bottom: 1px solid var(--rule); padding: 14px 18px 14px 0;
+    vertical-align: top; color: #222; line-height: 1.6;
+  }
+  table.cmp td.dim {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11.5px; color: var(--faint); padding-top: 17px;
+  }
 
   ul.points { list-style: none; }
   ul.points li {
@@ -194,6 +209,42 @@
       <div class="meta">24 steps &middot; 4 documents &middot; mean cos 0.366</div>
       <div class="note">Reaches the historical Hawking&ndash;Thorne&ndash;Susskind information-paradox debate.</div>
     </div>
+  </section>
+
+  <!-- ═══════════════ RIDE vs RAG ═══════════════ -->
+  <section>
+    <div class="s-head">Ride is not &ldquo;retrieve chunks and glue them&rdquo;</div>
+    <p class="s-sub">
+      Retrieval exists here too &mdash; but only to choose <strong>where to enter</strong> and
+      <strong>when to leave</strong>. No text is recombined at answer time.
+    </p>
+    <table class="cmp">
+      <thead>
+        <tr><th></th><th>classic RAG</th><th>0GLM ride</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="dim">unit of selection</td>
+          <td>a chunk picked by similarity</td>
+          <td><b>a document trajectory</b>, entered at a chosen grain</td>
+        </tr>
+        <tr>
+          <td class="dim">order of material</td>
+          <td>chunks re-ranked and glued by score</td>
+          <td><b>the author&rsquo;s own sentence order</b>, verbatim</td>
+        </tr>
+        <tr>
+          <td class="dim">transitions</td>
+          <td>every boundary is a stitch the decoder must survive</td>
+          <td>boundaries only between phases; inside a phase <b>zero join decisions</b></td>
+        </tr>
+        <tr>
+          <td class="dim">coherence source</td>
+          <td>hope: prompt instructions + decoder skill</td>
+          <td><b>inheritance:</b> humans already wrote it in order</td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 
   <!-- ═══════════════ TRACEABILITY ═══════════════ -->

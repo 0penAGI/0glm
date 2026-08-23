@@ -68,6 +68,23 @@ Answer construction layers (v17→v19):
    transition targets; amplitude always factual (predictions regress to the mean — use their
    *direction*, not their magnitude).
 
+### Ride is not "retrieve chunks and glue them"
+
+Retrieval exists in 0GLM — but only to choose **where to enter** and **when to leave**. No text
+is recombined at answer time:
+
+| | classic RAG | 0GLM ride |
+|---|---|---|
+| unit of selection | a chunk picked by similarity | a document trajectory, entered at a chosen grain |
+| order of material | chunks re-ranked and glued by score | the **author's own sentence order**, verbatim |
+| between-piece transitions | every boundary is a stitch the decoder must survive | boundaries exist only between phases; inside a phase there are **zero** join decisions |
+| where coherence comes from | hope: prompt instructions + decoder skill | inheritance: humans already wrote it in order |
+| failure mode | plausible-looking collage of fragments | visible, traceable: wrong document, wrong entry point |
+
+The consequence is practical, not just aesthetic: when a ride answer goes wrong, it is wrong in
+exactly one inspectable place — a bad anchor, a premature drift-gate exit, a foreign family —
+each of which is logged by `--trace`. A collage has no single place to be wrong in.
+
 ## Traceability by design
 
 `--trace` emits, for every answer:

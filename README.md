@@ -18,6 +18,9 @@ selection reason — before, during, and after generation.
 | **Second modality** | The same trajectory renders to audio; a predictive `z` signal steers transition direction (preferred in 7/7 blind listens by the author) |
 | **Key property** | Traceability **by design**: `--trace` prints candidates, anchors, gates and rejection reasons for every step |
 
+**Landing page with verbatim examples and a real trace excerpt:
+[0penagi.github.io/0glm](https://0penagi.github.io/0glm/)**
+
 ---
 
 ## Why
@@ -252,8 +255,9 @@ Research prototype. Two days of disciplined iteration produced the current archi
 design log (decisions, dead ends, negative results) is kept deliberately — including what did
 *not* work (runway-pref entry policy: rejected for losing sharp late entries).
 
-A landing page with verbatim example outputs and a real trace excerpt lives in
-[`index.html`](index.html).
+A landing page with verbatim example outputs and a real trace excerpt is live at
+[0penagi.github.io/0glm](https://0penagi.github.io/0glm/) (served from
+[`index.html`](index.html) in this repo).
 
 ## License
 

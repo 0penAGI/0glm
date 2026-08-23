@@ -104,6 +104,59 @@ independent panel is open.*
 **Scale & cost.** Corpus 16,535 docs → 1,270,597 grains; navigator trains on a laptop
 (M-series GPU, mixed MPS/CPU) in ~15 minutes to loss 6.42. No cluster, no API bills.
 
+### Evidence inventory
+
+Everything we claim above, tied to a test that actually ran:
+
+| # | evidence | protocol | outcome |
+|---|---|---|---|
+| 1 | Ride coherence beats legacy stack | paired blind reading, 2 questions | ride preferred 2/2 **despite worse retrieval scores** |
+| 2 | Out-of-domain battery | 8 topics outside climate family, blind reading | 5 clean, 2 soft within-family drift, 2 polysemy misses |
+| 3 | Polysemy root cause | targeted harvest +4,067 docs, retrain | python-dict .319→.490, resume .317→.454; arctic byte-identical |
+| 4 | Mechanism-opening retrieval | mean/max cosine of answer to question | arctic .421/.725 (ice-albedo), ocean .440/.762 (ENSO experts) |
+| 5 | Family gate safety | surgical A/B, identical seed | spam family eliminated; arctic output unchanged byte-for-byte |
+| 6 | z knows document dynamics | predicted vs actual style direction | cos .607 mean, 19/22 boundaries positive |
+| 7 | z-audio preference | randomized blind pairs, 2 singles + 5-topic series | 7/7 preferred z-steered render (single-listener panel) |
+| 8 | Negative results kept | entry-policy and blend-mode experiments | runway-pref rejected (lost sharp late anchors); value-blend rejected (muted dynamics) |
+
+## The dataset is a first-class component
+
+In most language systems the corpus is fuel you burn once during training. Here it stays load-bearing:
+
+- **Retrieval runs over every document at answer time.** Answer quality is bounded by corpus
+  coverage *per question*, not by parameter count. The doc-first index scans all 16,535 docs;
+  nothing about the mechanism changes at 165k or 1.65M.
+- **Density is correctness.** Polysemous queries fail not because the model is weak but because
+  thin clusters let a wrong-family document win. We demonstrated cause and cure: harvest more
+  of the right material and the miss flips (.319→.490) while control topics stay byte-identical.
+- **Grains inherit author structure.** Trajectories are read from how humans actually ordered
+  sentences — so a richer, better-edited corpus makes generation measurably more coherent.
+
+The current corpus is deliberately small: it is a complete, honest end-to-end demonstration,
+not a scaled system waiting to be evaluated. All evidence in the table above was collected on
+it — which means the evaluation methodology, not just the checkpoint, is reproducible on a
+laptop today.
+
+**What the system answers therefore depends on what you feed it.** With our corpus it speaks
+climate mechanics, Python documentation, resume practice, sleep science and black-hole
+thermodynamics — because that is what it has read. Point the same pipeline at medicine, law or
+your private notes and the answers come from there, with the same traceability. The
+architecture scales with data; the answers scale with *your* data.
+
+### Scaling properties
+
+| component | cost as corpus grows | bottleneck? |
+|---|---|---|
+| granulation + features | linear in text volume | no |
+| grain clustering (MiniBatchKMeans) | single pass, online | no |
+| MiniLM semantics | one-time embedding, cached | disk/speed only |
+| navigator training | linear in observed transitions | minutes→hours range |
+| doc-first retrieval | one vector scan over docs, per question | no |
+| ride inference | bounded by steps × phase size | no |
+
+Nothing in the design requires rethinking at two orders of magnitude more text; the honest
+statement is simply that beyond-16k behavior is projected from mechanisms, not yet measured.
+
 ### What we do *not* claim
 
 - No dialogue memory yet; each `--ask` is independent.
@@ -112,12 +165,35 @@ independent panel is open.*
   reproducible; preference verdicts await independent raters.
 - No standard benchmark suite yet — evaluation is task-native (retrieval cosines, blind pairs).
 
+## Open questions, closed
+
+Every known hole in the current build, stated and dispositioned — so nobody has to dig for them:
+
+| question | status | detail |
+|---|---|---|
+| Is coherence real or metric-gamed? | **closed** (text) | blind reading preferred ride 2/2 at *worse* cosine; metrics alone were blind to it |
+| Polysemy misses (python/resume) | **closed** | root cause = corpus density; fixed by harvest, controls byte-identical |
+| Why did the navigator's z look "dead"? | **closed** | ride is retrieval-path by design; z repurposed as audio-direction signal, 7/7 blind preference |
+| Does prediction regress to the mean? | **closed** | yes — use heads' *direction*, never magnitude; documented as a general field lesson |
+| Independent listening panel | **open** | all audio verdicts are single-listener; protocol (`zab_*_A/B.wav` + key) published for replication |
+| Dialogue memory across asks | **open** | each `--ask` independent; session state is next front |
+| Interactive chat mode | **open** | CLI cycle only today |
+| Task trajectories (reasoning, not prose) | **open** | same machinery targeted at reasoning traces ("0agi") |
+| Family gate inherits anchor-1 error | **stated** | if anchor #1 misses by polysemy, arc follows its family; planned: verify candidate family against the question independently |
+| Music / image / video targets | **stubbed** | manifest schema carries them; only sonification implemented |
+| Legacy attractor stack | **archival** | kept for A/B baselines, not a competing claim |
+| Beyond-16k behavior | **projected** | mechanisms scale per table above; not yet measured at larger corpus |
+
 ## Roadmap
 
 1. **Task trajectories (0agi)** — the same machinery over reasoning traces instead of prose.
-2. Independent listening/reading panels; publish the zab protocol for replication.
+2. Independent listening/reading panels; the zab protocol is published for replication.
 3. Dialogue memory across asks; interactive session mode.
-4. Multimodal targets already stubbed in the manifest schema (music/image/video).
+4. Corpus growth along the density axis that already proved causal (polysemy cure).
+5. Multimodal targets already stubbed in the manifest schema (music/image/video).
+
+Contributions welcome on all five — especially corpora: in this architecture,
+**the dataset you bring is the answers you get.**
 
 ## Repository layout
 

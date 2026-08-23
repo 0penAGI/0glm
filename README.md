@@ -121,7 +121,11 @@ Everything we claim above, tied to a test that actually ran:
 
 ## The dataset is a first-class component
 
-In most language systems the corpus is fuel you burn once during training. Here it stays load-bearing:
+In most language systems the corpus is fuel you burn once during training. In the **current
+build** of 0GLM it stays load-bearing — retrieval runs at answer time over every document.
+This is a stage of the project, not an article of faith: nothing in the architecture forbids
+baking the field into weights (see the open-questions table below), and that is exactly the
+next frontier. Until then:
 
 - **Retrieval runs over every document at answer time.** Answer quality is bounded by corpus
   coverage *per question*, not by parameter count. The doc-first index scans all 16,535 docs;
@@ -137,11 +141,12 @@ not a scaled system waiting to be evaluated. All evidence in the table above was
 it — which means the evaluation methodology, not just the checkpoint, is reproducible on a
 laptop today.
 
-**What the system answers therefore depends on what you feed it.** With our corpus it speaks
-climate mechanics, Python documentation, resume practice, sleep science and black-hole
-thermodynamics — because that is what it has read. Point the same pipeline at medicine, law or
-your private notes and the answers come from there, with the same traceability. The
-architecture scales with data; the answers scale with *your* data.
+**In the current build, what the system answers depends on what you feed it.** With our corpus
+it speaks climate mechanics, Python documentation, resume practice, sleep science and
+black-hole thermodynamics — because that is what it has read. Point the same pipeline at
+medicine, law or your private notes and the answers come from there, with the same
+traceability. And once the field is packed into weights, the live corpus dependency will
+loosen — the evidence and selection machinery, however, stay the same either way.
 
 ### Scaling properties
 
@@ -182,18 +187,22 @@ Every known hole in the current build, stated and dispositioned — so nobody ha
 | Family gate inherits anchor-1 error | **stated** | if anchor #1 misses by polysemy, arc follows its family; planned: verify candidate family against the question independently |
 | Music / image / video targets | **stubbed** | manifest schema carries them; only sonification implemented |
 | Legacy attractor stack | **archival** | kept for A/B baselines, not a competing claim |
+| Baking the field into weights | **planned, not done** | today answers route through the live corpus at answer time; packing trajectories + selection policy into parameters is the declared next stage — until it ships, dataset-dependence is a build-stage property, not an architectural promise |
 | Beyond-16k behavior | **projected** | mechanisms scale per table above; not yet measured at larger corpus |
 
 ## Roadmap
 
 1. **Task trajectories (0agi)** — the same machinery over reasoning traces instead of prose.
-2. Independent listening/reading panels; the zab protocol is published for replication.
-3. Dialogue memory across asks; interactive session mode.
-4. Corpus growth along the density axis that already proved causal (polysemy cure).
-5. Multimodal targets already stubbed in the manifest schema (music/image/video).
+2. **Bake the field into weights** — amortize document trajectories and the selection policy
+   into parameters, so coherence survives without a live corpus lookup at answer time.
+3. Independent listening/reading panels; the zab protocol is published for replication.
+4. Dialogue memory across asks; interactive session mode.
+5. Corpus growth along the density axis that already proved causal (polysemy cure).
+6. Multimodal targets already stubbed in the manifest schema (music/image/video).
 
-Contributions welcome on all five — especially corpora: in this architecture,
-**the dataset you bring is the answers you get.**
+Contributions welcome on all of them. And a practical note for anyone trying the pipeline
+today: in the pre-baking build, **the dataset you bring is the answers you get** — which is
+also the cleanest way to see the mechanism work.
 
 ## Repository layout
 

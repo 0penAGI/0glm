@@ -85,6 +85,24 @@ The consequence is practical, not just aesthetic: when a ride answer goes wrong,
 exactly one inspectable place — a bad anchor, a premature drift-gate exit, a foreign family —
 each of which is logged by `--trace`. A collage has no single place to be wrong in.
 
+### One field, many projections
+
+A grain is not merely a unit of text — it is a **state in a dynamic field**, with position
+(stylometry), semantics, affect, and learned transition dynamics. Language is the projection
+we currently read out: stitching selected grains renders *text*; mapping the same transitions
+through an audio bridge renders *sound*. One trajectory, multiple readouts:
+
+```
+corpus → grains (states) → navigator (trajectory dynamics) ─┬─► text   (stitch_narrative)
+                                                            └─► audio  (M_text_to_audio)
+```
+
+This is why the z-result matters beyond audio: once a predictive head is used for its
+*direction* rather than its magnitude (magnitude regresses to the mean; direction stayed
+informative at cos .607, 19/22 boundaries positive), any projection can be steered by the
+same signal. Whether this framing extends beyond text and sound — to planning traces,
+gesture, music — is the open promise of the approach.
+
 ## Traceability by design
 
 `--trace` emits, for every answer:
@@ -215,6 +233,10 @@ Every known hole in the current build, stated and dispositioned — so nobody ha
 1. **Task trajectories (0agi)** — the same machinery over reasoning traces instead of prose.
 2. **Bake the field into weights** — amortize document trajectories and the selection policy
    into parameters, so coherence survives without a live corpus lookup at answer time.
+   The testable hypothesis, stated plainly: *can explicitly observable navigation dynamics
+   be turned into a parametric system without losing provenance and controllability?*
+   If yes, 0GLM stops being a text generator with good logging and becomes something more
+   general: a navigable field whose readouts include language.
 3. Independent listening/reading panels; the zab protocol is published for replication.
 4. Dialogue memory across asks; interactive session mode.
 5. Corpus growth along the density axis that already proved causal (polysemy cure).

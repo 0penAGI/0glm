@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+pool/
+checkpoints/
+output/
+corpus*/
+logs_*/
+backups*/
+archive/
+*.log
+*.npz
+*.wav
+.DS_Store

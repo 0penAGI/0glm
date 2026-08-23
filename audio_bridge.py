@@ -22,6 +22,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 
 import numpy as np
 
@@ -622,15 +623,22 @@ def main():
             from sentence_transformers import SentenceTransformer
             _st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
             # v20 session: запрос едет вместе с контекстом прошлого ответа —
-            # местоимения («it», «the watch») разрешаются текстом, не порогами
+            # местоимения («it», «the watch») разрешаются текстом, не порогами.
+            # v20b форензика 2026-08-23: строковая склейка топит короткий вопрос
+            # в 400 символах прошлого ответа («Why do people make art?» → ответ
+            # про инсомнию; cos сдвига .676, перекрытие топ-16 доков 13/16).
+            # Бленд векторов β=0.3 держит вопрос главным: cos .462, overlap 5/16.
             if _sess["turns"]:
                 _pq, _pa = _sess["turns"][-1]
-                _qin = f"{Q} Context: {_pa[:400]}"
-                print(f"🔗 сессия: контекст прошлого ответа ({len(_sess['turns'])} ход)")
+                qemb_q = _st.encode([Q])[0]
+                ctx_v = _st.encode([_pa[:400]])[0]
+                mix = 0.7 * qemb_q + 0.3 * ctx_v
+                qn = (mix / (np.linalg.norm(mix) + 1e-9)).astype(np.float32)
+                print(f"🔗 сессия: бленд вопроса с контекстом ответа β=0.3 "
+                      f"({len(_sess['turns'])} ход)")
             else:
-                _qin = Q
-            qemb = _st.encode([_qin])[0]
-            qn = (qemb / (np.linalg.norm(qemb) + 1e-9)).astype(np.float32)
+                qemb = _st.encode([Q])[0]
+                qn = (qemb / (np.linalg.norm(qemb) + 1e-9)).astype(np.float32)
             boost, ctx_seed, q_feat, hit_list = _qa_boost(engine, pool, Q, dense_vec=qn)
             hit_texts = [t for t, _, _ in hit_list]
             hit_coords = [c for _, _, c in hit_list]
@@ -668,15 +676,38 @@ def main():
                 print(f"🚫 анти-хаб: w={args.hub_w} + анти-цитаты")
             trace_arc, trace_ev = None, None
             if args.arc > 0 and hit_texts:
+                # v20b P4 (форензика dict→Dico): навигационный boilerplate
+                # («See Modules, for a complete list…», «Read more at:…») —
+                # не мусор для _pool_junk, но в дуге он и вход, и хвост фазы
+                # не должен быть. Фильтр ЛОКАЛЬНЫЙ (только дуга), глобальный
+                # _pool_junk не трогаем — у него радиус кэшей сем.
+                _navjunk = re.compile(
+                    r"^(see \w+,? for a|read more at:|for a (complete|full) list"
+                    r"|click here|subscribe |follow us on|share this article)", re.I)
+
+                def _arc_junk(t):
+                    return g._pool_junk(t) or bool(_navjunk.match(t.strip()))
                 # дуга ответа v18: первый этап — ВСЕ 12k доков (кэш doc_embs),
                 # не 6%-сэмпл зернового ретрива. Топ-D дока → лучшее зерно входа
                 # → хвостовая оценка (куда ride повезёт) → MMR по хвостам.
                 lookup = _build_traj_lookup(pool)
                 Dembs = g.build_doc_embs(pool, engine.sems)
                 dsims = Dembs @ qn
-                top_docs = [int(d) for d in np.argsort(-dsims)[:16]]
+                # v20b анти-ревизит (эхо-камера сессии): контекст тянет ретрив
+                # в уже поездившие доки — ходы 2–3 начинались тем же абзацем,
+                # что ход 1. Доки, ставшие якорями ранее в сессии, исключаются
+                # из отбора; берём из более широкой выборки, чтобы топ-16
+                # не худел. Логируем, кого выкинули (проверка агрессивности).
+                _seen = _sess.setdefault("visited_docs", set())
+                _ranked = [int(d) for d in np.argsort(-dsims)[:64]
+                           if int(d) not in _seen]
+                _skipped = sorted(_seen &
+                                  {int(d) for d in np.argsort(-dsims)[:64]})
+                top_docs = _ranked[:16]
                 print(f"🚪 док-поиск: топ-{len(top_docs)} из {len(Dembs)} доков, "
-                      f"sim .{int(dsims[top_docs[0]]*1000)}/1000")
+                      f"sim .{int(dsims[top_docs[0]]*1000)}/1000"
+                      + (f" | 🚫 ревизит: -{_skipped} ({len(_seen)} док(ов) сессии)"
+                         if _skipped else ""))
 
                 def _tail_vec(coord, k=10):
                     """Среднее сем следующих k чистых микро/мезо звеньев траектории."""
@@ -689,7 +720,7 @@ def main():
                         lv, ix = int(traj[j][0]), int(traj[j][1])
                         if lv <= 1:
                             t = pool[f"{['micro', 'meso', 'macro'][lv]}_texts"][ix]
-                            if not g._pool_junk(t):
+                            if not _arc_junk(t):
                                 vs.append(engine.sems[lv][ix])
                         j += 1
                     if not vs:
@@ -700,11 +731,12 @@ def main():
 
                 # зерно входа в каждом топ-доке: лучший чистый гран по sim к вопросу
                 cand_coords, cand_texts, tails, trace_cands = [], [], [], []
+                cand_docs = []
                 for d in top_docs:
                     members = [(int(lv), int(ix)) for lv, ix in pool["trajectories"][d]
                                if int(lv) <= 1]
                     ok = [k for k, (lv, ix) in enumerate(members)
-                          if not g._pool_junk(pool[f"{['micro', 'meso'][lv]}_texts"][ix])]
+                          if not _arc_junk(pool[f"{['micro', 'meso'][lv]}_texts"][ix])]
                     if not ok:
                         continue
                     S = np.array([engine.sems[members[k][0]][members[k][1]] for k in ok])
@@ -719,6 +751,7 @@ def main():
                     cand_coords.append(coord)
                     cand_texts.append(pool[f"{['micro', 'meso'][lv]}_texts"][ix])
                     tails.append(tv)
+                    cand_docs.append(d)
                     trace_cands.append({"doc": d, "dsim": round(float(dsims[d]), 3),
                                         "entry": pool[f"{['micro', 'meso'][lv]}_texts"][ix][:70]})
                 T = np.array(tails) if tails else np.zeros((1, 384), np.float32)
@@ -735,8 +768,13 @@ def main():
                         if mxs > 0.85: continue               # уже сказано
                         v = float(trels[i]) - 0.7 * mxs
                         if v > bv: bv, bi = v, ii
-                    if bi is None:
-                        break                                 # нового релевантного нет
+                    # v20b планка достойности (форензика dict→Dico): после топ-2
+                    # все кандидаты имеют v≈0.05–0.07 — уровень шума; мусорный док
+                    # выигрывал лотерею с запасом .005 и становился фазой.
+                    # Якорь должен НАБРАТЬ очко: v<0.08 → добор честно стопается,
+                    # дуга короче, но без шумовых фаз.
+                    if bi is None or bv < 0.08:
+                        break
                     anchors.append({"sem": T[order[bi]],
                                     "coord": cand_coords[order[bi]]})
                 # интроспекция: причины по каждому кандидату
@@ -744,15 +782,23 @@ def main():
                 for ri, row in enumerate(trace_cands):
                     row["trel"] = round(float(trels[ri]), 3)
                     row["fam"] = round(float(T[ri] @ fam0), 3)
+                    row["v"] = round(float(trels[ri])
+                                     - 0.7 * max(float(T[ri] @ A_["sem"])
+                                                 for A_ in anchors), 3)
                     row["chosen"] = cand_coords[ri] in chosen
                     if not row["chosen"]:
                         row["why_not"] = ("trel<.32" if trels[ri] < 0.32 else
                                           "чужая семья" if row["fam"] < 0.30 else
                                           "дубль фазы (mxs>.85)" if
                                           max(float(T[ri] @ A_["sem"]) for A_ in anchors) > 0.85
+                                          else "ниже планки (v<.08)" if row["v"] < 0.08
                                           else "не выиграл MMR")
                 trace_arc = {"top_docs": len(top_docs), "candidates": trace_cands,
                              "n_anchors": len(anchors)}
+                # анти-ревизит: поездившие якоря запоминаются на сессию
+                for A_ in anchors:
+                    _ci = cand_coords.index(A_["coord"])
+                    _seen.add(cand_docs[_ci])
                 if len(anchors) >= 2:
                     per = max(4, int(round(args.steps / len(anchors))))
                     cfg["arc"] = {"anchors": anchors, "per_phase": per}

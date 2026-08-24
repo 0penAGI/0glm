@@ -235,15 +235,15 @@ Every known hole in the current build, stated and dispositioned — so nobody ha
 | Legacy attractor stack | **archival** | kept for A/B baselines, not a competing claim |
 | question | status | detail |
 |---|---|---|
-| Baking the field into weights | **shipped (brain_v3)** | planner + granule bank + masks baked into one 1.9 GB file, zero retrieval at inference; blind A/B vs its own ride teacher: **2 : 3** — wins multi-point assembly and thin-corpus topics, loses where one long authoritative passage is required; honest limitation documented, roadmap v7 = document-level plan token. Weights: [HF](https://huggingface.co/0penAGI/0glm), pipeline: [`brain_v3/`](brain_v3/) |
+| Baking the field into weights | **shipped** | planner + granule bank + masks baked into one 1.9 GB file, zero retrieval at inference — [`brain_v3/`](brain_v3/), weights on [HF](https://huggingface.co/0penAGI/0glm) |
 | Beyond-16k behavior | **projected** | mechanisms scale per table above; not yet measured at larger corpus |
 
 ## Roadmap
 
 1. **Task trajectories (0agi)** — the same machinery over reasoning traces instead of prose.
-2. **Brain v7: document-level plan token** — the baked planner is local (next granule from
-   context + question only); v7 picks an anchor document once and amortizes intra-document
-   navigation from demo paths. Target: beat the teacher blind where single long passages win.
+2. **Baked brain: document-level plan token** — amortize intra-document navigation so long
+   single-passage answers stop losing to the trajectory teacher; bake the audio bridge into
+   the same artifact.
 3. Independent listening/reading panels; the zab protocol is published for replication.
 4. Dialogue memory across asks; interactive session mode.
 5. Corpus growth along the density axis that already proved causal (polysemy cure).

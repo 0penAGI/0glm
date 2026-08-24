@@ -320,9 +320,39 @@
     </p>
   </section>
 
+  <!-- ═══════════════ BAKED BRAIN ═══════════════ -->
+  <section>
+    <div class="s-head">Baked brain v3: one file, zero retrieval</div>
+    <p class="s-sub">
+      The declared next stage shipped: <strong>brain_v3.pt</strong> (1.9&nbsp;GB) bakes the planner,
+      the granule bank and quality masks into a single artifact. At inference there is
+      <strong>no corpus lookup at all</strong> — the field navigates baked granules directly.
+      Trained by distilling the ride teacher: 53K demo triples with correction moments plus
+      doc-discriminative negatives ("continue this document's line, not a paraphrase from a neighbor").
+    </p>
+    <table class="cmp">
+      <thead>
+        <tr><th></th><th>blind A/B vs its own teacher</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="dim">brain v0–v4</td><td>0 : 5 — knowledge baked, behavior not</td></tr>
+        <tr><td class="dim">brain v2 (distillation)</td><td><b>2 : 3</b> — wins multi-point assembly (El Ni&ntilde;o), thin-corpus topics (Python dict)</td></tr>
+        <tr><td class="dim">brain v3 (doc-negatives)</td><td><b>2 : 3</b> — question alignment flat at cos .41; loses where one long authoritative passage is required</td></tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin-top:16px">
+      Honest limitation, stated as architecture not bug: the baked planner is local — it picks the
+      next granule from (context, question) only; the teacher knows in advance that twenty granules
+      of one document form a coherent passage. Roadmap v7: a document-level plan token.
+      Weights + full bake pipeline:
+      <a href="https://huggingface.co/0penAGI/0glm">huggingface.co/0penAGI/0glm</a>.
+    </p>
+  </section>
+
   <footer>
     <div>
       <a href="https://github.com/0penAGI/0glm">github.com/0penAGI/0glm</a> &nbsp;&middot;&nbsp;
+      model: <a href="https://huggingface.co/0penAGI/0glm">hf.co/0penAGI/0glm</a> &nbsp;&middot;&nbsp;
       heritage: <a href="https://huggingface.co/0penAGI/0MGE">0MGE (HuggingFace)</a> /
       <a href="https://github.com/0penAGI/0MGE">GitHub</a>
     </div>

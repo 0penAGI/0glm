@@ -1,5 +1,8 @@
 # 0GLM — Granular Language Model
 
+> **Weights & artifact: [Hugging Face — 0penAGI/0glm](https://huggingface.co/0penAGI/0glm)** ·
+> Landing page: [0penagi.github.io/0glm](https://0penagi.github.io/0glm/)
+
 > **On the name:** *Granular Language Model* describes what the system does today.
 > The same letters also read **Granular Living Model** — the class of system being built:
 > grains as living states of a navigable field, language just one readout among possible
@@ -230,18 +233,17 @@ Every known hole in the current build, stated and dispositioned — so nobody ha
 | Family gate inherits anchor-1 error | **stated** | if anchor #1 misses by polysemy, arc follows its family; planned: verify candidate family against the question independently |
 | Music / image / video targets | **stubbed** | manifest schema carries them; only sonification implemented |
 | Legacy attractor stack | **archival** | kept for A/B baselines, not a competing claim |
-| Baking the field into weights | **planned, not done** | today answers route through the live corpus at answer time; packing trajectories + selection policy into parameters is the declared next stage — until it ships, dataset-dependence is a build-stage property, not an architectural promise |
+| question | status | detail |
+|---|---|---|
+| Baking the field into weights | **shipped (brain_v3)** | planner + granule bank + masks baked into one 1.9 GB file, zero retrieval at inference; blind A/B vs its own ride teacher: **2 : 3** — wins multi-point assembly and thin-corpus topics, loses where one long authoritative passage is required; honest limitation documented, roadmap v7 = document-level plan token. Weights: [HF](https://huggingface.co/0penAGI/0glm), pipeline: [`brain_v3/`](brain_v3/) |
 | Beyond-16k behavior | **projected** | mechanisms scale per table above; not yet measured at larger corpus |
 
 ## Roadmap
 
 1. **Task trajectories (0agi)** — the same machinery over reasoning traces instead of prose.
-2. **Bake the field into weights** — amortize document trajectories and the selection policy
-   into parameters, so coherence survives without a live corpus lookup at answer time.
-   The testable hypothesis, stated plainly: *can explicitly observable navigation dynamics
-   be turned into a parametric system without losing provenance and controllability?*
-   If yes, 0GLM stops being a text generator with good logging and becomes something more
-   general: a navigable field whose readouts include language.
+2. **Brain v7: document-level plan token** — the baked planner is local (next granule from
+   context + question only); v7 picks an anchor document once and amortizes intra-document
+   navigation from demo paths. Target: beat the teacher blind where single long passages win.
 3. Independent listening/reading panels; the zab protocol is published for replication.
 4. Dialogue memory across asks; interactive session mode.
 5. Corpus growth along the density axis that already proved causal (polysemy cure).
@@ -257,6 +259,7 @@ also the cleanest way to see the mechanism work.
 granular_text_field.py   core: granulation, clusters, caches, navigator, ride engine
 audio_bridge.py          CLI: --ask Q --ride [--trace] [--no-z-audio] → text + WAV + manifests
 train_field_v15.py       trains the navigator (v15_field) on the grain pool
+brain_v3/                baked brain: model card, bake pipeline (demo→train→artifact), eval tools
 build_corpus_big.py      shard harvesting → corpus (md5 dedup, topic gates)
 build_corpus_topics.py   targeted density harvesting (prog/resume/general buckets)
 build_corpus_glm.py      alternative corpus builder variant

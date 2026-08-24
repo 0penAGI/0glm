@@ -1,6 +1,9 @@
+torch>=2.1
 numpy
-torch
-scikit-learn
 sentence-transformers
-sentencepiece
+scikit-learn
+scipy
 soundfile
+librosa
+matplotlib
+tqdm
